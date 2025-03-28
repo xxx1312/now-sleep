@@ -1,0 +1,192 @@
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AHP-TOPSIS Decision Tool</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 0; }
+    .menu-toggle { position: fixed; top: 10px; left: 10px; background: #333; color: #fff; padding: 10px; cursor: pointer; z-index: 1001; border-radius: 5px; }
+    .sidebar { position: fixed; top: 0; left: -270px; width: 260px; height: 100vh; background: #222; color: #fff; padding: 20px; transition: left 0.3s ease; z-index: 1000; overflow-y: auto; }
+    .sidebar.active { left: 0; }
+    .main { margin-left: 0; padding: 30px; max-width: 800px; margin: 60px auto; }
+    .card { background: #fff; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); margin-bottom: 20px; }
+    h2, h3 { margin-top: 0; }
+    label { font-weight: bold; display: block; margin: 15px 0 5px; }
+    select, input[type=number] { width: 100%; padding: 10px; margin-bottom: 10px; border-radius: 5px; border: 1px solid #ccc; }
+    input[disabled] { background: #e5e5e5; color: #666; }
+    button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; margin-top: 10px; }
+    .flex-row { display: flex; justify-content: space-between; gap: 10px; }
+    canvas { max-width: 100%; margin-top: 20px; }
+    .overlay, .popup { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 2000; }
+    .overlay { background: rgba(0,0,0,0.5); }
+    .popup-box { background: white; padding: 30px; margin: auto; border-radius: 10px; max-width: 400px; margin-top: 10%; position: relative; }
+    .popup.active, .overlay.active { display: flex; align-items: center; justify-content: center; }
+    .popup-box .close-btn { position: absolute; top: 10px; right: 15px; font-size: 18px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="menu-toggle" onclick="toggleMenu()">☰ Menu</div>
+  <div class="sidebar" id="sidebar">
+    <h3>Admin Controls</h3>
+    <label><input type="checkbox" id="editToggle" onchange="toggleEdit()"> Edit PESTEL Weights</label>
+    <div id="weightsSection" style="display:none;"></div>
+    <hr>
+    <h4>TOPSIS Results</h4>
+    <canvas id="topsisChart"></canvas>
+    <p>Participants: <span id="participantCount">0</span></p>
+    <hr>
+    <h4>Feedback Summary</h4>
+    <p>Average: <span id="feedbackAvg">-</span></p>
+    <p>Total: <span id="feedbackCount">0</span></p>
+  </div>
+
+  <div class="main">
+    <div class="card" id="questionCard"></div>
+  </div>
+
+  <div class="overlay" id="overlay"></div>
+  <div class="popup" id="feedbackPopup">
+    <div class="popup-box">
+      <span class="close-btn" onclick="closeFeedback()">✖</span>
+      <h3>Your Feedback</h3>
+      <div id="feedbackForm"></div>
+      <button onclick="submitFeedback()">Submit Feedback</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyrDav_JX5MtWQdFFspKeHEXlft875BCshBJ2KSJWqVN1JHrnxjKRASI0-VobARh0yc5w/exec";
+    const SYSTEMS = ["Hydro", "Solar", "Wind", "Bioenergy", "Geothermal"];
+    const CRITERIA = ["Political", "Economic", "Social", "Technological", "Environmental", "Legal"];
+    const SCALE = ["1 - Not Important", "2 - Slightly Important", "3 - Moderate", "4 - Important", "5 - Very Important"];
+    const FEEDBACK_QS = ["Ease of Use", "Clarity", "Feedback Design", "Usefulness", "Recommendation"];
+
+    let current = 0;
+    let answers = {};
+    let weights = Object.fromEntries(CRITERIA.map(c => [c, 1]));
+
+    function toggleMenu() {
+      document.getElementById("sidebar").classList.toggle("active");
+    }
+
+    function toggleEdit() {
+      const toggle = document.getElementById("editToggle").checked;
+      const section = document.getElementById("weightsSection");
+      section.style.display = toggle ? 'block' : 'none';
+      section.innerHTML = CRITERIA.map(c => `
+        <label>${c}</label>
+        <input type="number" step="0.01" value="${weights[c]}" ${toggle ? '' : 'disabled'} onchange="weights['${c}']=parseFloat(this.value)">
+      `).join('');
+    }
+
+    function renderQuestion() {
+      const div = document.getElementById("questionCard");
+      const system = SYSTEMS[current];
+      let html = `<h2>${system}</h2><p>How important is this criterion for this RE system according to you?</p>`;
+      CRITERIA.forEach(c => {
+        html += `<label>${c}</label><select id='${system}-${c}'>` +
+                SCALE.map(s => `<option value='${s[0]}'>${s}</option>`).join('') + `</select>`;
+      });
+      html += `<div class="flex-row">`;
+      if (current > 0) html += `<button onclick="prevPage()">Previous</button>`;
+      if (current < SYSTEMS.length - 1) html += `<button onclick="nextPage()">Next</button>`;
+      else html += `<button onclick="submitEvaluation()">Submit Evaluation</button>`;
+      html += `</div>`;
+      div.innerHTML = html;
+    }
+
+    function saveCurrent() {
+      const system = SYSTEMS[current];
+      answers[system] = {};
+      CRITERIA.forEach(c => {
+        answers[system][c] = document.getElementById(`${system}-${c}`).value;
+      });
+    }
+
+    function nextPage() { saveCurrent(); current++; renderQuestion(); }
+    function prevPage() { saveCurrent(); current--; renderQuestion(); }
+
+    function submitEvaluation() {
+      saveCurrent();
+      fetch(SCRIPT_URL + '?action=submitEvaluation', {
+        method: 'POST',
+        body: JSON.stringify(answers),
+        headers: { 'Content-Type': 'application/json' }
+      })
+      .then(response => response.text())
+      .then(() => {
+        alert("Your response has been submitted.");
+        fetchResults();
+        setTimeout(() => showFeedback(), 300);
+      })
+      .catch(err => alert("Submission failed: " + err));
+    }
+
+    function showFeedback() {
+      document.getElementById("overlay").classList.add("active");
+      document.getElementById("feedbackPopup").classList.add("active");
+      const div = document.getElementById("feedbackForm");
+      div.innerHTML = FEEDBACK_QS.map((q, i) => `
+        <label>${q}</label>
+        <select id='fb${i+1}'>
+          <option value='1'>1 - Poor</option>
+          <option value='2'>2 - Fair</option>
+          <option value='3'>3 - Good</option>
+          <option value='4'>4 - Very Good</option>
+          <option value='5'>5 - Excellent</option>
+        </select>`).join('');
+    }
+
+    function closeFeedback() {
+      document.getElementById("feedbackPopup").classList.remove("active");
+      document.getElementById("overlay").classList.remove("active");
+      current = 0;
+      answers = {};
+      renderQuestion();
+    }
+
+    function submitFeedback() {
+      const feedback = [];
+      for (let i = 1; i <= 5; i++) feedback.push(document.getElementById(`fb${i}`).value);
+      fetch(SCRIPT_URL + '?action=submitFeedback', {
+        method: 'POST',
+        body: JSON.stringify(feedback),
+        headers: { 'Content-Type': 'application/json' }
+      }).then(() => {
+        alert("Thank you for your feedback!");
+        closeFeedback();
+      });
+    }
+
+    function fetchResults() {
+      fetch(SCRIPT_URL + '?action=getLiveData')
+        .then(res => res.json())
+        .then(data => {
+          document.getElementById('participantCount').innerText = data.topsis.count;
+          document.getElementById('feedbackAvg').innerText = data.feedback.average;
+          document.getElementById('feedbackCount').innerText = data.feedback.count;
+          const ctx = document.getElementById('topsisChart').getContext('2d');
+          new Chart(ctx, {
+            type: 'bar',
+            data: {
+              labels: data.topsis.labels,
+              datasets: [{
+                label: 'TOPSIS Score',
+                data: data.topsis.scores,
+                backgroundColor: '#007bff'
+              }]
+            },
+            options: { responsive: true, plugins: { legend: { display: false } } }
+          });
+        });
+    }
+
+    renderQuestion();
+    fetchResults();
+  </script>
+</body>
+</html>
